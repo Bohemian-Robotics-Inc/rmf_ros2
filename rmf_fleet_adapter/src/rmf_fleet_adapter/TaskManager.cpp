@@ -785,6 +785,33 @@ std::optional<std::string> TaskManager::current_task_id() const
   if (_active_task)
     return _active_task.id();
 
+  // [opencode-modified] Return waiting task ID only if moving or not at parking spot
+  if (_waiting && !_waiting.is_finished())
+  {
+    // If robot is moving, show task ID
+    if (_context->current_mode() == rmf_fleet_msgs::msg::RobotMode::MODE_MOVING)
+      return _waiting.id();
+
+    // If robot is idle but not at the dedicated charging/parking waypoint,
+    // it implies we are in transit (waiting for door/lift or paused).
+    // Show task ID in this case.
+    if (_idle_task && !_context->location().empty())
+    {
+      bool at_parking = false;
+      for (const auto& start : _context->location())
+      {
+        if (start.waypoint() == _context->dedicated_charging_wp() && !start.lane())
+        {
+          at_parking = true;
+          break;
+        }
+      }
+
+      if (!at_parking)
+        return _waiting.id();
+    }
+  }
+
   return std::nullopt;
 }
 
@@ -825,7 +852,38 @@ std::string TaskManager::robot_status() const
   }
 
   if (!_active_task)
+  {
+    // [opencode-modified] Check if we should report "working" during idle task (parking)
+    if (_idle_task && _waiting && !_waiting.is_finished())
+    {
+      // 1. If actually moving, report working
+      if (_context->current_mode() == rmf_fleet_msgs::msg::RobotMode::MODE_MOVING)
+        return "working";
+
+      // 2. If not moving (IDLE/WAITING) but NOT at the parking spot, report working.
+      // This covers intermediate stops like door/lift waits.
+      if (!_context->location().empty())
+      {
+        bool at_parking = false;
+        for (const auto& start : _context->location())
+        {
+          // Check if we are at the dedicated charging waypoint and NOT on a lane
+          if (start.waypoint() == _context->dedicated_charging_wp() && !start.lane())
+          {
+            at_parking = true;
+            break;
+          }
+        }
+
+        if (!at_parking)
+          return "working";
+      }
+      
+      // 3. If at parking spot and not moving, report idle.
+      return "idle";
+    }
     return "idle";
+  }
 
   return "working";
 }
@@ -1073,10 +1131,21 @@ void TaskManager::reassign_dispatched_requests(
 //==============================================================================
 TaskManager::RobotModeMsg TaskManager::robot_mode() const
 {
+  // [opencode-modified] Check _waiting status to support parking/charging state
+  // If _waiting is active (e.g. parking), we should use the context's mode
+  // instead of defaulting to IDLE.
+  auto mode_value = rmf_fleet_msgs::msg::RobotMode::MODE_IDLE;
+  
+  const bool active_task_running = !_active_task.is_finished();
+  const bool waiting_task_running = static_cast<bool>(_waiting) && !_waiting.is_finished();
+
+  if (active_task_running || waiting_task_running)
+  {
+    mode_value = _context->current_mode();
+  }
+
   const auto mode = rmf_fleet_msgs::build<RobotModeMsg>()
-    .mode(_active_task.is_finished() ?
-      RobotModeMsg::MODE_IDLE :
-      _context->current_mode())
+    .mode(mode_value)
     .mode_request_id(0);
 
   return mode;

@@ -18,6 +18,8 @@
 #include "MoveRobot.hpp"
 #include "RxOperators.hpp"
 
+#include <rmf_fleet_msgs/msg/robot_mode.hpp>
+
 namespace rmf_fleet_adapter {
 namespace phases {
 
@@ -142,6 +144,10 @@ MoveRobot::Action::Action(
   _plan_id{plan_id},
   _tail_period{tail_period}
 {
+  // [opencode-modified] Set mode to MOVING when starting a move action
+  // This ensures the robot reports MOVING even during intermediate stops (doors/lifts)
+  _context->current_mode(rmf_fleet_msgs::msg::RobotMode::MODE_MOVING);
+
   _first_graph_index = [&]() -> std::optional<std::size_t>
     {
       for (const auto& wp : _waypoints)
@@ -152,6 +158,12 @@ MoveRobot::Action::Action(
 
       return std::nullopt;
     }();
+}
+
+// [opencode-modified] Reset mode to IDLE when movement action is destroyed/finished
+MoveRobot::Action::~Action()
+{
+  _context->current_mode(rmf_fleet_msgs::msg::RobotMode::MODE_IDLE);
 }
 
 } // namespace phases
