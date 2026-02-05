@@ -112,6 +112,9 @@ struct MoveRobot
       rmf_traffic::PlanId plan_id,
       std::optional<rmf_traffic::Duration> tail_period);
 
+    // [opencode-modified] Added destructor declaration
+    ~Action();
+
     template<typename Subscriber>
     void operator()(const Subscriber& s);
 
